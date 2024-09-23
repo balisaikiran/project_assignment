@@ -7,9 +7,10 @@ from url_discoverer import URLDiscoverer
 from utils import is_product_url
 from urllib.parse import urljoin, urlparse
 import json
+import time
 
 class Crawler:
-    def __init__(self, max_concurrent_requests=10, output_file="product_urls.json", max_products_per_domain=100, max_depth=2):
+    def __init__(self, max_concurrent_requests=10, output_file="product_urls.json", max_products_per_domain=100, max_depth=2, timeout=30):
         self.max_concurrent_requests = max_concurrent_requests
         self.max_products_per_domain = max_products_per_domain
         self.max_depth = max_depth
@@ -17,7 +18,9 @@ class Crawler:
         self.semaphore = asyncio.Semaphore(max_concurrent_requests)
         self.output_file = output_file
         self.visited_urls = set()
-        logging.basicConfig(level=logging.INFO)
+        self.timeout = timeout
+        self.start_time = time.time()
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
         self._initialize_output_file()
 
     def _initialize_output_file(self):
@@ -26,18 +29,21 @@ class Crawler:
 
     async def fetch(self, session, url):
         try:
-            async with session.get(url, timeout=10) as response:
+            async with session.get(url, timeout=self.timeout) as response:
                 if response.status == 200:
                     return await response.text()
                 else:
                     logging.error(f"Error fetching {url}: Status {response.status}")
                     return None
+        except asyncio.TimeoutError:
+            logging.error(f"Timeout error fetching {url}")
+            return None
         except Exception as e:
             logging.error(f"Error fetching {url}: {e}")
             return None
 
     async def crawl_domain(self, session, domain, base_domain, depth=0):
-        if depth > self.max_depth:
+        if depth > self.max_depth or (time.time() - self.start_time) > 300:  # 5 minutes timeout
             return []
 
         async with self.semaphore:
@@ -60,8 +66,8 @@ class Crawler:
                 parsed_url = urlparse(domain)
                 base_domain = f"{parsed_url.scheme}://{parsed_url.netloc}"
                 tasks.append(self.crawl_domain(session, domain, base_domain))
-            results = await asyncio.gather(*tasks)
-            return results
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            return [r for r in results if not isinstance(r, Exception)]
 
     async def process_html(self, session, html_content, current_url, base_domain, depth):
         new_urls = self.url_discoverer.discover_urls(html_content, base_domain)
@@ -80,17 +86,24 @@ class Crawler:
                 if len(product_urls) >= self.max_products_per_domain:
                     break
             else:
-                tasks.append(self.crawl_domain(session, url, base_domain, depth + 1))
+                tasks.append(asyncio.create_task(self.crawl_domain(session, url, base_domain, depth + 1)))
 
             if len(product_urls) >= self.max_products_per_domain:
                 break
 
-        # Process non-product URLs concurrently
-        results = await asyncio.gather(*tasks)
-        for result in results:
-            product_urls.update(result)
-            if len(product_urls) >= self.max_products_per_domain:
-                break
+        # Process non-product URLs concurrently with a timeout
+        done, pending = await asyncio.wait(tasks, timeout=60)  # 60 seconds timeout
+        for task in pending:
+            task.cancel()
+        
+        for task in done:
+            try:
+                result = task.result()
+                product_urls.update(result)
+                if len(product_urls) >= self.max_products_per_domain:
+                    break
+            except Exception as e:
+                logging.error(f"Error processing task: {e}")
 
         return product_urls
 
