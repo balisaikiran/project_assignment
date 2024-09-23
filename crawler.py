@@ -8,6 +8,7 @@ from utils import is_product_url
 from urllib.parse import urljoin, urlparse
 import json
 import time
+import re
 
 class Crawler:
     def __init__(self, max_concurrent_requests=10, output_file="product_urls.json", max_products_per_domain=100, max_depth=2, timeout=30):
@@ -23,9 +24,25 @@ class Crawler:
         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
         self._initialize_output_file()
 
+        # Add a list of patterns for URLs to ignore
+        self.ignore_patterns = [
+            r'privacy',
+            r'return',
+            r'shipping',
+            r'about-us',
+            r'contact',
+            r'terms',
+            r'faq',
+            r'career'
+        ]
+
     def _initialize_output_file(self):
         with open(self.output_file, 'w') as f:
             json.dump({}, f)
+
+    def should_ignore_url(self, url):
+        """Check if the URL should be ignored based on the ignore patterns."""
+        return any(re.search(pattern, url, re.IGNORECASE) for pattern in self.ignore_patterns)
 
     async def fetch(self, session, url):
         try:
@@ -47,8 +64,8 @@ class Crawler:
             return []
 
         async with self.semaphore:
-            if domain in self.visited_urls:
-                logging.info(f"Skipping already visited domain: {domain}")
+            if domain in self.visited_urls or self.should_ignore_url(domain):
+                logging.info(f"Skipping URL: {domain}")
                 return []
 
             logging.info(f"Crawling domain: {domain} at depth {depth}")
@@ -75,7 +92,7 @@ class Crawler:
         tasks = []
 
         for url in new_urls:
-            if url in self.visited_urls:
+            if url in self.visited_urls or self.should_ignore_url(url):
                 continue
 
             if is_product_url(url):
