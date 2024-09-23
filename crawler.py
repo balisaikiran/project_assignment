@@ -1,43 +1,53 @@
 import asyncio
 import aiohttp
-from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlparse
+from url_discoverer import URLDiscoverer
+from utils import is_product_url
 
 class Crawler:
-    def __init__(self, domains):
-        self.domains = domains
-        self.product_urls = {domain: set() for domain in domains}
-        self.url_patterns = ['/product/', '/item/', '/p/']
+    def __init__(self, max_concurrent_requests=10):
+        self.max_concurrent_requests = max_concurrent_requests
+        self.url_discoverer = URLDiscoverer()
 
-    async def fetch(self, session, url):
-        try:
-            async with session.get(url) as response:
-                return await response.text()
-        except Exception as e:
-            print(f"Failed to fetch {url}: {e}")
-            return None
+    async def crawl_domains(self, domains):
+        results = {}
+        async with aiohttp.ClientSession() as session:
+            tasks = [self.crawl_domain(session, domain) for domain in domains]
+            domain_results = await asyncio.gather(*tasks)
+            for domain, urls in zip(domains, domain_results):
+                results[domain] = urls
+        return results
 
     async def crawl_domain(self, session, domain):
-        homepage = f"http://{domain}"
-        html = await self.fetch(session, homepage)
-        if html:
-            self.parse_html(domain, homepage, html)
+        base_url = f"https://{domain}"
+        to_visit = {base_url}
+        visited = set()
+        product_urls = set()
 
-    def parse_html(self, domain, base_url, html):
-        soup = BeautifulSoup(html, 'html.parser')
-        for link in soup.find_all('a', href=True):
-            url = urljoin(base_url, link['href'])
-            if self.is_product_url(url):
-                self.product_urls[domain].add(url)
+        while to_visit:
+            current_batch = list(to_visit)[:self.max_concurrent_requests]
+            to_visit = to_visit - set(current_batch)
 
-    def is_product_url(self, url):
-        path = urlparse(url).path
-        return any(pattern in path for pattern in self.url_patterns)
+            tasks = [self.process_url(session, url, domain) for url in current_batch]
+            batch_results = await asyncio.gather(*tasks)
 
-    async def run(self):
-        async with aiohttp.ClientSession() as session:
-            tasks = [self.crawl_domain(session, domain) for domain in self.domains]
-            await asyncio.gather(*tasks)
+            for url, new_urls, is_product in batch_results:
+                visited.add(url)
+                if is_product:
+                    product_urls.add(url)
+                to_visit.update(new_urls - visited)
 
-    def get_results(self):
-        return self.product_urls
+        return list(product_urls)
+
+    async def process_url(self, session, url, domain):
+        try:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    content = await response.text()
+                    new_urls = self.url_discoverer.discover_urls(content, domain)
+                    is_product = is_product_url(url)
+                    return url, new_urls, is_product
+                else:
+                    return url, set(), False
+        except Exception as e:
+            print(f"Error processing {url}: {str(e)}")
+            return url, set(), False

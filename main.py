@@ -1,15 +1,24 @@
 import asyncio
+import json
 from crawler import Crawler
 
-def main():
-    domains = ["example1.com", "example2.com", "example3.com"]
-    crawler = Crawler(domains)
-    asyncio.run(crawler.run())
-    results = crawler.get_results()
-    for domain, urls in results.items():
-        print(f"Domain: {domain}")
-        for url in urls:
-            print(f"  {url}")
+async def main():
+    # List of e-commerce domains to crawl
+    domains = [
+        "example1.com",
+        "example2.com",
+        "example3.com",
+        # Add more domains here
+    ]
+
+    crawler = Crawler()
+    results = await crawler.crawl_domains(domains)
+
+    # Save results to a JSON file
+    with open("product_urls.json", "w") as f:
+        json.dump(results, f, indent=2)
+
+    print("Crawling completed. Results saved to product_urls.json")
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
