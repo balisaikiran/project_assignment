@@ -3,22 +3,22 @@ import json
 from crawler import Crawler
 
 async def main():
-    # List of e-commerce domains to crawl
+    # Add your list of domains here
     domains = [
-        "example1.com",
-        "example2.com",
-        "example3.com",
-        # Add more domains here
-    ]
-
-    crawler = Crawler()
+        "https://in.puma.com"
+    ]  
+    
+    crawler = Crawler(max_concurrent_requests=5)
     results = await crawler.crawl_domains(domains)
+    
+    product_urls = set()
+    for result in results:
+        if result:
+            product_urls.update(result)
 
-    # Save results to a JSON file
-    with open("product_urls.json", "w") as f:
-        json.dump(results, f, indent=2)
-
-    print("Crawling completed. Results saved to product_urls.json")
+    # Save all product URLs to a JSON file
+    with open('product_urls.json', 'w') as f:
+        json.dump(list(product_urls), f, indent=4)
 
 if __name__ == "__main__":
     asyncio.run(main())
