@@ -9,7 +9,7 @@ from urllib.parse import urljoin, urlparse
 import json
 
 class Crawler:
-    def __init__(self, max_concurrent_requests=10, output_file="product_urls.json", max_products_per_domain=10, max_depth=2):
+    def __init__(self, max_concurrent_requests=10, output_file="product_urls.json", max_products_per_domain=100, max_depth=2):
         self.max_concurrent_requests = max_concurrent_requests
         self.max_products_per_domain = max_products_per_domain  # Limit products per domain
         self.max_depth = max_depth  # Limit recursion depth
